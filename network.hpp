@@ -45,6 +45,14 @@ class Layer {
             if (!bias_.empty())    std::cout << "  bias: "    << bias_    << std::endl;
             if (!output_.empty())  std::cout << "  output: "  << output_  << std::endl;
         }
+        
+        virtual size_t param_count() const {
+            size_t wc = 0;
+            size_t bc = 0;
+            if (!weights_.empty()) wc = weights_.N * weights_.C * weights_.H * weights_.W;
+            if (!bias_.empty())    bc = bias_.N * bias_.C * bias_.H * bias_.W;
+            return wc + bc;
+        }
         // TODO: additional required methods
         void set_input(const Tensor& input) {
             input_ = input;
@@ -74,8 +82,15 @@ class Conv2d : public Layer {
 
     // TODO
     void read_weights_bias(std::ifstream& is) override {
-        is.read(reinterpret_cast<char*>(weights_.data()), weights_.N * weights_.C * weights_.H * weights_.W * sizeof(float));
-        is.read(reinterpret_cast<char*>(bias_.data()), bias_.N * bias_.C * bias_.H * bias_.W * sizeof(float));
+        size_t wcount = weights_.N * weights_.C * weights_.H * weights_.W;
+        std::vector<float> tmp_w(wcount);
+        is.read(reinterpret_cast<char*>(tmp_w.data()), wcount * sizeof(float));
+        weights_.quantize_from_floats(tmp_w);
+
+        size_t bcount = bias_.N * bias_.C * bias_.H * bias_.W;
+        std::vector<float> tmp_b(bcount);
+        is.read(reinterpret_cast<char*>(tmp_b.data()), bcount * sizeof(float));
+        bias_.quantize_from_floats(tmp_b);
     }
 
     void fwd() override {
@@ -130,8 +145,15 @@ class Linear : public Layer {
 
     // TODO
     void read_weights_bias(std::ifstream& is) override {
-        is.read(reinterpret_cast<char*>(weights_.data()), weights_.N * weights_.C * weights_.H * weights_.W * sizeof(float));
-        is.read(reinterpret_cast<char*>(bias_.data()), bias_.N * bias_.C * bias_.H * bias_.W * sizeof(float));
+        size_t wcount = weights_.N * weights_.C * weights_.H * weights_.W;
+        std::vector<float> tmp_w(wcount);
+        is.read(reinterpret_cast<char*>(tmp_w.data()), wcount * sizeof(float));
+        weights_.quantize_from_floats(tmp_w);
+
+        size_t bcount = bias_.N * bias_.C * bias_.H * bias_.W;
+        std::vector<float> tmp_b(bcount);
+        is.read(reinterpret_cast<char*>(tmp_b.data()), bcount * sizeof(float));
+        bias_.quantize_from_floats(tmp_b);
     }
 
     void fwd() override {
@@ -218,19 +240,12 @@ class ReLu : public Layer {
 
     void fwd() override{
         output_ = Tensor(input_.N, input_.C, input_.H, input_.W);
-
-        float* in_ptr = input_.data();
-        float* out_ptr = output_.data();
+        output_.set_scale(input_.scale());
 
         size_t total_ele = input_.N * input_.C * input_.H * input_.W;
-
         for(size_t i=0; i<total_ele; ++i){
-            if(in_ptr[i]<0.0f){
-                out_ptr[i]=0.0f;
-            }
-            else{
-                out_ptr[i] = in_ptr[i];
-            }
+            float v = input_.get_flat(i);
+            output_.set_flat(i, v < 0.0f ? 0.0f : v);
         }
     }
 };
@@ -247,6 +262,8 @@ class SoftMax : public Layer {
 
     void fwd() override{
         output_ = Tensor(input_.N, input_.C, input_.H, input_.W);
+        // Softmax outputs probabilities in 0..1; use a small fixed scale
+        output_.set_scale(1.0f/256.0f);
 
         for(size_t n=0; n<input_.N; ++n){
             float max_val = input_(n, 0, 0, 0);
@@ -264,7 +281,8 @@ class SoftMax : public Layer {
             }
 
             for(size_t c=0; c<input_.C; ++c){
-                output_(n, c, 0, 0)/=sum;
+                float v = output_(n, c, 0, 0) / sum;
+                output_(n, c, 0, 0) = v;
             }
 
         }
@@ -283,8 +301,13 @@ class Flatten : public Layer {
 
     void fwd() override{
         size_t flattened_sz = input_.C * input_.H * input_.W;
-        output_ =Tensor(input_.N, flattened_sz, 1, 1);
-        std::copy(input_.data(), input_.data()+(input_.N *flattened_sz), output_.data());
+        output_ = Tensor(input_.N, flattened_sz, 1, 1);
+        // keep same numeric scale when flattening
+        output_.set_scale(input_.scale());
+        size_t total = input_.N * flattened_sz;
+        for(size_t i=0; i<total; ++i){
+            output_.set_flat(i, input_.get_flat(i));
+        }
     }
 
 
@@ -334,6 +357,16 @@ class NeuralNetwork {
                 }
             }
             return next_input;
+        }
+
+        size_t total_params() const {
+            size_t sum = 0;
+            for (auto* l : layers_) sum += l->param_count();
+            return sum;
+        }
+
+        size_t memory_bytes_for_params(size_t bytes_per_param) const {
+            return total_params() * bytes_per_param;
         }
 
     private:

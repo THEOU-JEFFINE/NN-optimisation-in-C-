@@ -138,6 +138,18 @@ int main(int argc, char** argv){
     nn.load(weights_file);
     std::cout <<"Loaded weights from " << weights_file <<std::endl;
 
+    // Print memory metrics for parameters (weights + biases)
+    size_t total_params = nn.total_params();
+    size_t bytes_float32 = nn.memory_bytes_for_params(4);
+    size_t bytes_int8 = nn.memory_bytes_for_params(1);
+    double saved_bytes = static_cast<double>(bytes_float32 - bytes_int8);
+    double saved_pct = 100.0 * saved_bytes / static_cast<double>(bytes_float32);
+
+    std::cout << "Model parameters: " << total_params << std::endl;
+    std::cout << "Parameter memory (float32): " << bytes_float32 << " bytes" << std::endl;
+    std::cout << "Parameter memory (int16):   " << bytes_int8 << " bytes" << std::endl;
+    std::cout << "Saved: " << saved_bytes << " bytes (" << saved_pct << "% )" << std::endl;
+
     std::cout <<"Running inference ... " <<std::endl;
 
     size_t num_correct =0;
@@ -193,24 +205,7 @@ int main(int argc, char** argv){
     std::cout << " Time per Image: " << (duration.count() / num_tests) << " ms" << std::endl;
     std::cout << "==============================================\n" << std::endl;
 
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> distrib(0, num_tests -1);
-
-    for(int k = 0; k<3; ++k){
-        int idx = distrib(gen);
-        std::cout<< "\n Random Image #" << "(ID:" <<idx <<")" <<std::endl;
-        Tensor input =test_data.at(idx);
-        print_binary(input);
-        Tensor output = nn.predict(input);
-
-        print_confidence(output);
-
-        if (have_labels){
-            std::cout << "Actual label: " <<(int)test_labels[idx] <<std::endl;
-        }
-
-    }
+    
 
 
 
