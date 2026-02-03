@@ -147,6 +147,7 @@ int main(int argc, char** argv){
         num_tests = test_labels.size();
     }
 
+    const double FLOPS_PER_IMAGE = 833040.0;
     //start timer...
     auto start_time = std::chrono::high_resolution_clock::now();
 
@@ -181,17 +182,25 @@ int main(int argc, char** argv){
 
     //stop the clock
     auto end_time = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double, std::milli> duration = end_time - start_time;
+    // duration_sec is in seconds
+    std::chrono::duration<double> duration_sec = end_time - start_time;
+    double total_time_ms = duration_sec.count() * 1000.0;
 
-    if(have_labels){
-        std::cout << "Final Accuracy:" <<(100.0f * num_correct/num_tests) << "%" <<std::endl;
-    } else {
-        std::cout <<"Inference completed on " <<num_tests <<" images." <<std::endl;
-    }
+    double total_flops = num_tests * FLOPS_PER_IMAGE;
+    double gflops = (total_flops / 1e9) / duration_sec.count();
 
-    std::cout << " Total Time:     " << duration.count() << " ms" << std::endl;
-    std::cout << " Time per Image: " << (duration.count() / num_tests) << " ms" << std::endl;
-    std::cout << "==============================================\n" << std::endl;
+
+    std::cout << " Performance metrics**********" << std::endl;
+    if(have_labels) std::cout << " Final Accuracy: " <<(100.0f * num_correct/num_tests) << "%" <<std::endl;
+    int tm, tn, tk;
+    get_gemm_tiling(tm, tn, tk);
+    std::cout << " GEMM tiles: TM=" << tm << " TN=" << tn << " TK=" << tk << std::endl;
+    std::cout << " OpenMP threads: " << get_omp_threads() << std::endl;
+    std::cout << " Total Time:     " << total_time_ms << " ms" << std::endl;
+    std::cout << " Time per Image: " << (total_time_ms / num_tests) << " ms" << std::endl;
+    std::cout << " Throughput:     " << (num_tests / duration_sec.count()) << " images/sec" << std::endl;
+    std::cout << " Performance:    " << std::fixed << std::setprecision(4) << gflops << " GFLOPs" << std::endl;
+    std::cout << "***********************************88\n" << std::endl;
 
     std::random_device rd;
     std::mt19937 gen(rd());
